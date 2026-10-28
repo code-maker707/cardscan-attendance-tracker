@@ -14,20 +14,20 @@ const studentTable = blink.db.table<StudentsRow>('students')
 const attendanceTable = blink.db.table<AttendanceRecordsRow>('attendance_records')
 const classOptions = ['Grade 8 · Section A', 'Grade 8 · Section B']
 const sampleStudents = [
-  { studentCode: '2401', name: 'Amara Johnson', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2402', name: 'Theo Williams', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2403', name: 'Sofia Chen', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2404', name: 'Mateo Garcia', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2405', name: 'Zara Patel', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2406', name: 'Ethan Brooks', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2407', name: 'Maya Thompson', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2408', name: 'Noah Kim', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2409', name: 'Isla Rivera', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2410', name: 'Leo Martin', grade: 'Grade 8', section: 'A' },
-  { studentCode: '2411', name: 'Avery Wilson', grade: 'Grade 8', section: 'B' },
-  { studentCode: '2412', name: 'Lucas Brown', grade: 'Grade 8', section: 'B' },
-  { studentCode: '2413', name: 'Nina Park', grade: 'Grade 8', section: 'B' },
-  { studentCode: '2414', name: 'Omar Davis', grade: 'Grade 8', section: 'B' },
+  { studentCode: '2401', name: 'Ayesha Khan', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2402', name: 'Muhammad Ali', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2403', name: 'Fatima Ahmed', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2404', name: 'Hassan Raza', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2405', name: 'Zainab Malik', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2406', name: 'Hamza Iqbal', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2407', name: 'Maryam Shah', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2408', name: 'Usman Tariq', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2409', name: 'Sana Qureshi', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2410', name: 'Bilal Hussain', grade: 'Grade 8', section: 'A' },
+  { studentCode: '2411', name: 'Hira Javed', grade: 'Grade 8', section: 'B' },
+  { studentCode: '2412', name: 'Ahmed Nawaz', grade: 'Grade 8', section: 'B' },
+  { studentCode: '2413', name: 'Noor Siddiqui', grade: 'Grade 8', section: 'B' },
+  { studentCode: '2414', name: 'Daniyal Sheikh', grade: 'Grade 8', section: 'B' },
 ]
 
 function todayKey() {
