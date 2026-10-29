@@ -11,6 +11,7 @@ export type AttendanceRecordsRow = {
   attendanceDate: string
   scannedAt: string
   method: string
+  checkedOutAt: string | null
 }
 
 export type StudentsRow = {
@@ -21,4 +22,19 @@ export type StudentsRow = {
   grade: string
   section: string
   createdAt: string
+}
+
+export type UsersRow = {
+  id: string
+  email: string
+  emailVerified: number | string | null
+  displayName: string | null
+  avatarUrl: string | null
+  phone: string | null
+  phoneVerified: number | string | null
+  role: string | null
+  metadata: string | null
+  createdAt: string
+  updatedAt: string
+  lastSignIn: string
 }

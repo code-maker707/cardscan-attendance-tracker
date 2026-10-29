@@ -64,12 +64,14 @@ function AttendanceApp() {
   const [className, setClassName] = useState(classOptions[0])
   const [search, setSearch] = useState('')
   const [studentCode, setStudentCode] = useState('')
-  const [scanning, setScanning] = useState(false)
+  const [checkOutCode, setCheckOutCode] = useState('')
+  const [scanMode, setScanMode] = useState<'checkin' | 'checkout' | null>(null)
   const [addingStudent, setAddingStudent] = useState(false)
   const [studentName, setStudentName] = useState('')
   const [newStudentCode, setNewStudentCode] = useState('')
   const [saving, setSaving] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const checkoutVideoRef = useRef<HTMLVideoElement>(null)
   const scannerRef = useRef<{ stop: () => void } | null>(null)
 
   useEffect(() => blink.auth.onAuthStateChanged((state) => {
@@ -124,20 +126,53 @@ function AttendanceApp() {
     }
   }, [className, records, students, user])
 
+  const markCheckedOut = useCallback(async (rawCode: string, method: string) => {
+    if (!user) return
+    const code = rawCode.trim().toUpperCase()
+    const student = students.find((item) => item.studentCode.toUpperCase() === code)
+    if (!student) {
+      toast.error(`No student found for card ${code || 'without an ID'}.`)
+      return
+    }
+    const record = records.find((item) => item.studentCode.toUpperCase() === code && item.className === className)
+    if (!record) {
+      toast.error(`${student.name} needs to check in before checking out.`)
+      return
+    }
+    if (record.checkedOutAt) {
+      toast.info(`${student.name} is already checked out.`)
+      return
+    }
+    setSaving(true)
+    try {
+      await attendanceTable.update(record.id, { checkedOutAt: new Date().toISOString() })
+      setRecords(await attendanceTable.list({ where: { userId: user.id, attendanceDate: todayKey() }, orderBy: { scannedAt: 'desc' } }))
+      setCheckOutCode('')
+      toast.success(`${student.name} checked out`)
+    } catch (error) {
+      toast.error(messageOf(error))
+    } finally {
+      setSaving(false)
+    }
+  }, [className, records, students, user])
+
   useEffect(() => {
-    if (!scanning || !videoRef.current) return
+    if (!scanMode) return
+    const video = scanMode === 'checkin' ? videoRef.current : checkoutVideoRef.current
+    if (!video) return
     let active = true
     let controls: { stop: () => void } | undefined
     void import('@zxing/browser').then(({ BrowserQRCodeReader }) => {
-      if (!active || !videoRef.current) return
+      if (!active) return
       const reader = new BrowserQRCodeReader()
-      return reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+      return reader.decodeFromVideoDevice(undefined, video, (result) => {
         if (result && active) {
           active = false
           controls?.stop()
           scannerRef.current?.stop()
-          setScanning(false)
-          void markPresent(result.getText(), 'QR card')
+          setScanMode(null)
+          if (scanMode === 'checkin') void markPresent(result.getText(), 'QR card')
+          else void markCheckedOut(result.getText(), 'QR card')
         }
       }).then((createdControls) => {
         controls = createdControls
@@ -145,7 +180,7 @@ function AttendanceApp() {
       })
     }).catch((error: unknown) => {
       if (active) {
-        setScanning(false)
+        setScanMode(null)
         toast.error(`Camera could not start: ${messageOf(error)}`)
       }
     })
@@ -155,14 +190,15 @@ function AttendanceApp() {
       scannerRef.current?.stop()
       scannerRef.current = null
     }
-  }, [scanning, markPresent])
+  }, [scanMode, markCheckedOut, markPresent])
 
   const classStudents = useMemo(() => {
     const section = className.endsWith('B') ? 'B' : 'A'
     return students.filter((student) => student.section === section)
   }, [className, students])
   const classRecords = useMemo(() => records.filter((record) => record.className === className), [className, records])
-  const presentCodes = useMemo(() => new Set(records.map((record) => record.studentCode)), [records])
+  const presentCodes = useMemo(() => new Set(classRecords.map((record) => record.studentCode)), [classRecords])
+  const checkedOutCodes = useMemo(() => new Set(classRecords.filter((record) => record.checkedOutAt).map((record) => record.studentCode)), [classRecords])
   const filteredStudents = students.filter((student) => `${student.name} ${student.studentCode}`.toLowerCase().includes(search.toLowerCase()))
   const sampleRosterRows = students.filter((student) => sampleStudents.some((sample) => sample.studentCode === student.studentCode && sample.name === student.name))
   const percent = classStudents.length ? Math.round(classRecords.length / classStudents.length * 100) : 0
@@ -248,23 +284,36 @@ function AttendanceApp() {
                 <StatCard label="Class roster" value={`${classStudents.length}`} note={className.replace(' · ', ' / ')} icon={<GraduationCap size={18} />} />
               </section>
 
-              <section className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(330px,0.9fr)]">
+              <section className="mt-6 grid gap-5 xl:grid-cols-2">
                 <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
                   <div className="flex items-center justify-between border-b border-border px-5 py-4 sm:px-6"><div><h2 className="font-serif text-xl">Class check-in</h2><p className="mt-1 text-xs text-muted-foreground">Scan a student card to mark them present.</p></div><span className="rounded-full bg-secondary px-3 py-1 text-[11px] font-semibold text-secondary-foreground">{className}</span></div>
                   <div className="p-5 sm:p-6">
-                    <div className={`relative flex min-h-[215px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed ${scanning ? 'border-primary bg-foreground' : 'border-border bg-background'}`}>
-                      {scanning ? <><video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" muted playsInline /><div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="relative h-40 w-40 rounded-2xl border-2 border-primary shadow-[0_0_0_999px_rgba(0,0,0,0.32)]"><span className="absolute -top-1 left-1/2 h-0.5 w-2/3 -translate-x-1/2 animate-pulse bg-primary" /></div></div><div className="absolute bottom-3 rounded-full bg-foreground/75 px-3 py-1.5 text-xs font-medium text-background">Point the camera at a student QR card</div></> : <><div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary text-primary"><Camera size={24} /></div><p className="text-sm font-semibold">Ready to scan</p><p className="mt-1 max-w-xs text-center text-xs leading-5 text-muted-foreground">Use your device camera to read a QR code printed on a student card.</p><button onClick={() => setScanning(true)} className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:scale-[1.02] active:scale-[0.98]"><Camera size={15} /> Open camera</button></>}
+                    <div className={`relative flex min-h-[215px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed ${scanMode === 'checkin' ? 'border-primary bg-foreground' : 'border-border bg-background'}`}>
+                      {scanMode === 'checkin' ? <><video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" muted playsInline /><div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="relative h-40 w-40 rounded-2xl border-2 border-primary shadow-[0_0_0_999px_rgba(0,0,0,0.32)]"><span className="absolute -top-1 left-1/2 h-0.5 w-2/3 -translate-x-1/2 animate-pulse bg-primary" /></div></div><div className="absolute bottom-3 rounded-full bg-foreground/75 px-3 py-1.5 text-xs font-medium text-background">Scan the student card to check in</div></> : <><div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary text-primary"><Camera size={24} /></div><p className="text-sm font-semibold">Ready to check in</p><p className="mt-1 max-w-xs text-center text-xs leading-5 text-muted-foreground">Scan the QR code on a student card when they arrive.</p><button onClick={() => setScanMode('checkin')} className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:scale-[1.02] active:scale-[0.98]"><Camera size={15} /> Open camera</button></>}
                     </div>
-                    {scanning && <button onClick={() => { scannerRef.current?.stop(); setScanning(false) }} className="mt-3 w-full rounded-lg border border-border py-2 text-sm font-medium hover:bg-secondary">Stop camera</button>}
+                    {scanMode === 'checkin' && <button onClick={() => { scannerRef.current?.stop(); setScanMode(null) }} className="mt-3 w-full rounded-lg border border-border py-2 text-sm font-medium hover:bg-secondary">Stop camera</button>}
                     <div className="my-5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"><span className="h-px flex-1 bg-border" />or enter card ID<span className="h-px flex-1 bg-border" /></div>
                     <form onSubmit={submitCode} className="flex gap-2"><label className="sr-only" htmlFor="student-code">Student card ID</label><input id="student-code" value={studentCode} onChange={(event) => setStudentCode(event.target.value)} placeholder="e.g. 2401" className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring" /><button disabled={!studentCode.trim() || saving} className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"><Check size={16} /> Mark present</button></form>
                     <p className="mt-2 text-[11px] text-muted-foreground">QR codes should contain the student's card ID. You can also type the ID above.</p>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-card shadow-sm">
+                <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                  <div className="flex items-center justify-between border-b border-border px-5 py-4 sm:px-6"><div><h2 className="font-serif text-xl">Class check-out</h2><p className="mt-1 text-xs text-muted-foreground">Scan a card or enter its ID when a student leaves.</p></div><span className="rounded-full bg-secondary px-3 py-1 text-[11px] font-semibold text-secondary-foreground">{className}</span></div>
+                  <div className="p-5 sm:p-6">
+                    <div className={`relative flex min-h-[215px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed ${scanMode === 'checkout' ? 'border-primary bg-foreground' : 'border-border bg-background'}`}>
+                      {scanMode === 'checkout' ? <><video ref={checkoutVideoRef} className="absolute inset-0 h-full w-full object-cover" muted playsInline /><div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="relative h-40 w-40 rounded-2xl border-2 border-primary shadow-[0_0_0_999px_rgba(0,0,0,0.32)]"><span className="absolute -top-1 left-1/2 h-0.5 w-2/3 -translate-x-1/2 animate-pulse bg-primary" /></div></div><div className="absolute bottom-3 rounded-full bg-foreground/75 px-3 py-1.5 text-xs font-medium text-background">Scan the student card to check out</div></> : <><div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary text-primary"><Camera size={24} /></div><p className="text-sm font-semibold">Ready to check out</p><p className="mt-1 max-w-xs text-center text-xs leading-5 text-muted-foreground">Record the time a student leaves with their card.</p><button onClick={() => setScanMode('checkout')} className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:scale-[1.02] active:scale-[0.98]"><Camera size={15} /> Open camera</button></>}
+                    </div>
+                    {scanMode === 'checkout' && <button onClick={() => { scannerRef.current?.stop(); setScanMode(null) }} className="mt-3 w-full rounded-lg border border-border py-2 text-sm font-medium hover:bg-secondary">Stop camera</button>}
+                    <div className="my-5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"><span className="h-px flex-1 bg-border" />or enter card ID<span className="h-px flex-1 bg-border" /></div>
+                    <form onSubmit={(event) => { event.preventDefault(); if (checkOutCode.trim()) void markCheckedOut(checkOutCode, 'Card ID') }} className="flex gap-2"><label className="sr-only" htmlFor="checkout-code">Student card ID for check-out</label><input id="checkout-code" value={checkOutCode} onChange={(event) => setCheckOutCode(event.target.value)} placeholder="e.g. 2401" className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring" /><button disabled={!checkOutCode.trim() || saving} className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"><LogOut size={16} /> Check out</button></form>
+                    <p className="mt-2 text-[11px] text-muted-foreground">Students must be checked in first. The departure time is saved to today’s attendance.</p>
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm xl:col-span-2">
                   <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-serif text-xl">Today’s attendance</h2><p className="mt-1 text-xs text-muted-foreground">Live check-ins for this class</p></div><button onClick={() => setView('students')} className="text-xs font-semibold text-primary hover:underline">View roster</button></div>
-                  <div className="divide-y divide-border">{dataLoading ? <div className="space-y-3 p-5">{[1, 2, 3].map((item) => <div key={item} className="h-12 animate-pulse rounded-lg bg-muted" />)}</div> : classRecords.length ? classRecords.slice(0, 7).map((record) => <div key={record.id} className="flex items-center gap-3 px-5 py-3.5"><AvatarName name={record.studentName} code={record.studentCode} /><span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground"><span className="h-1.5 w-1.5 rounded-full bg-primary" />{new Date(record.scannedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></div>) : <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center"><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-secondary text-primary"><CalendarDays size={19} /></div><p className="text-sm font-semibold">A fresh start</p><p className="mt-1 max-w-[220px] text-xs leading-5 text-muted-foreground">Student check-ins will appear here as cards are scanned.</p></div>}</div>
+                  <div className="divide-y divide-border sm:grid sm:grid-cols-2 sm:divide-y-0 xl:grid-cols-3">{dataLoading ? <div className="space-y-3 p-5">{[1, 2, 3].map((item) => <div key={item} className="h-12 animate-pulse rounded-lg bg-muted" />)}</div> : classRecords.length ? classRecords.slice(0, 9).map((record) => <div key={record.id} className="flex items-center gap-3 border-b border-border px-5 py-3.5"><AvatarName name={record.studentName} code={record.studentCode} /><div className="ml-auto shrink-0 text-right text-[11px] leading-5 text-muted-foreground"><div>In · {new Date(record.scannedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>{record.checkedOutAt ? <div className="font-semibold text-primary">Out · {new Date(record.checkedOutAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div> : <div>Still in</div>}</div></div>) : <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center sm:col-span-2 xl:col-span-3"><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-secondary text-primary"><CalendarDays size={19} /></div><p className="text-sm font-semibold">A fresh start</p><p className="mt-1 max-w-[220px] text-xs leading-5 text-muted-foreground">Student check-ins will appear here as cards are scanned.</p></div>}</div>
                   {classRecords.length > 7 && <div className="border-t border-border px-5 py-3 text-center text-xs text-muted-foreground">And {classRecords.length - 7} more students checked in</div>}
                 </div>
               </section>
@@ -279,7 +328,7 @@ function AttendanceApp() {
             <section className="rounded-2xl border border-border bg-card shadow-sm">
               <div className="flex flex-col gap-4 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><div className="mb-1 text-xs font-semibold uppercase tracking-[0.15em] text-primary">Classroom directory</div><h2 className="font-serif text-2xl">Student roster</h2><p className="mt-1 text-sm text-muted-foreground">Manage card IDs and check-in status.</p></div><button onClick={() => setAddingStudent(true)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:scale-[1.02] active:scale-[0.98]"><Plus size={16} /> Add student</button></div>
               <div className="flex items-center gap-2 border-b border-border px-5 py-3"><Search size={16} className="text-muted-foreground" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search students or card IDs" className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" /></div>
-              <div className="divide-y divide-border">{filteredStudents.map((student) => <div key={student.id} className="flex items-center gap-3 px-5 py-4 sm:px-6"><AvatarName name={student.name} code={student.studentCode} /><span className="hidden rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground sm:inline">{student.grade} · Section {student.section}</span><span className="ml-auto rounded-full px-2.5 py-1 text-xs font-semibold">{presentCodes.has(student.studentCode) ? <span className="text-primary">Present</span> : <span className="text-muted-foreground">Not checked in</span>}</span><button onClick={() => void markPresent(student.studentCode, 'Roster')} disabled={presentCodes.has(student.studentCode)} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold transition hover:bg-secondary disabled:opacity-50">{presentCodes.has(student.studentCode) ? 'Checked in' : 'Mark present'}</button></div>)}{filteredStudents.length === 0 && <p className="p-10 text-center text-sm text-muted-foreground">No students match that search.</p>}</div>
+              <div className="divide-y divide-border">{filteredStudents.map((student) => <div key={student.id} className="flex items-center gap-3 px-5 py-4 sm:px-6"><AvatarName name={student.name} code={student.studentCode} /><span className="hidden rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground sm:inline">{student.grade} · Section {student.section}</span><span className="ml-auto rounded-full px-2.5 py-1 text-xs font-semibold">{checkedOutCodes.has(student.studentCode) ? <span className="text-muted-foreground">Checked out</span> : presentCodes.has(student.studentCode) ? <span className="text-primary">Present</span> : <span className="text-muted-foreground">Not checked in</span>}</span><button onClick={() => void markPresent(student.studentCode, 'Roster')} disabled={presentCodes.has(student.studentCode)} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold transition hover:bg-secondary disabled:opacity-50">{presentCodes.has(student.studentCode) ? 'Checked in' : 'Mark present'}</button></div>)}{filteredStudents.length === 0 && <p className="p-10 text-center text-sm text-muted-foreground">No students match that search.</p>}</div>
             </section>
           )}
           <footer className="mt-10 flex items-center justify-between border-t border-border pt-5 text-[11px] text-muted-foreground"><span>Rollcall · Attendance, made simple</span><span className="flex items-center gap-1.5"><ShieldCheck size={13} /> Private to your account</span></footer>
@@ -304,8 +353,8 @@ function AvatarName({ name, code }: { name: string; code: string }) {
   return <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold text-accent-foreground">{initials}</div><div className="min-w-0"><div className="truncate text-sm font-semibold">{name}</div><div className="font-mono text-[10px] tracking-wide text-muted-foreground">ID {code}</div></div></div>
 }
 
-function StudentRow({ student, present, onMark }: { student: StudentsRow; present: boolean; onMark: () => void }) {
-  return <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-background p-3"><AvatarName name={student.name} code={student.studentCode} /><button onClick={onMark} disabled={present} className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-semibold transition ${present ? 'bg-secondary text-primary' : 'border border-border hover:bg-secondary'}`}>{present ? <><Check size={13} /> Present</> : 'Mark present'}</button></div>
+function StudentRow({ student, present, checkedOut, onMark }: { student: StudentsRow; present: boolean; checkedOut: boolean; onMark: () => void }) {
+  return <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-background p-3"><AvatarName name={student.name} code={student.studentCode} /><button onClick={onMark} disabled={present} className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-semibold transition ${present ? 'bg-secondary text-primary' : 'border border-border hover:bg-secondary'}`}>{present ? <><Check size={13} /> {checkedOut ? 'Checked out' : 'Present'}</> : 'Mark present'}</button></div>
 }
 
 function SignInScreen() {
